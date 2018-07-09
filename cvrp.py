@@ -2,11 +2,10 @@
 
 ''' librairies nécéssaires '''
 from globals import *
-from support import pprint
-from support import reset_timer
+from logging_cvrp import *
 reset_timer()
-if debug:
-	print("starting to import necessary librairies...")
+log.write_globals()
+log.title("starting to import necessary librairies...")
 import pyomo.environ as pyo
 from pyomo.opt import SolverFactory
 from numpy.random import random as rd
@@ -23,8 +22,7 @@ import sys
 import cvrpGoogleOpt as google
 import cbc
 
-if debug:
-	pprint("finished importing all modules")
+log.write_timed("finished importing all modules")
 
 ##################
 ### HYPOTHESIS ###
@@ -72,6 +70,8 @@ if pyomo.version.version_info >= (4, 2, 0, '', 0):
 ######################
 ### INITIALISATION ###
 ######################
+
+log.title("initialising model")
 
 
 ''' initalise the solver and the abstract model '''
@@ -144,8 +144,7 @@ instance.c_deg = pyo.Constraint(instance.nodes, rule=support.rule_deg)
 instance.c_cap = pyo.ConstraintList()  # on utilise cette structure pour pouvoir ajouter et supprimer des contraintes par la suite
 #liste vide pour commencer
 
-if debug:
-	pprint("finished constructing model")
+log.write_timed("finished constructing model")
 
 
 ######################
@@ -208,12 +207,11 @@ class instance_manager():
 def branch(instance,instance_manager):
 	#branches instance problem into two complementary sub problem instances over a specific index
 	
-	if debug:
-		pprint(support.list_to_string(instance.id)+"+++++ entering branching")
+	log.subtitle("entering branching",instance.id)
 	
 	# we choose the index for branching whose corresponding value is closest to 0.5
 	index = -1,-1	
-	dist = 1 # max theoretical dist for bridges considered is actually 0.5
+	dist = 1 # initialised at max value (actually max is 0.5 but oh well)
 	
 	for bridge in instance.x.keys():
 		#do not consider bridge with depot for their bound is (0,2) and we would have to branch over 3 instances
@@ -225,12 +223,8 @@ def branch(instance,instance_manager):
 	
 	if index==(-1,-1):
 		raise NameError("No branching index found")
-	
-	if debug:
-		pprint(support.list_to_string(instance.id)+"----- branching done over index "+str(index)+" with value "+str(instance.x[index].value))
 		
-		
-	#creating new instances ! recycling the old one into one of the branches 		
+	#creating new instances ! recycling the old one into one of the new branches 		
 	instance.x[index].fixed = True
 	instance2 = instance.clone()
 	instance.x[index].value = 0
@@ -243,16 +237,14 @@ def branch(instance,instance_manager):
 	instance.depth = depth+1
 	instance.id = id0+[id.get_and_increment()]
 	instance2.id = id0+[id.get_and_increment()]	
-	
-	if debug:
-		log = instance.log
-		instance.log = log+str(index)+" : 0 / "	
-		instance.log = log+str(index)+" : 1 / "
-		print(support.list_to_string(id0)+"----- new value of objective function for instance "+str(instance.id[-1])+" fixed 0 : "+str(round(pyo.value(instance.objective),2)))
-		pprint(support.list_to_string(id0)+"----- new value of objective function for instance "+str(instance2.id[-1])+" fixed 1 : "+str(round(pyo.value(instance2.objective),2)))
 		
 	instance.lower_bound = cbc.lower_bound(instance)
 	instance2.lower_bound = cbc.lower_bound(instance2)
+	
+	log.write_timed("branching found over index "+str(index)+" with value "+str(instance.x[index].value),instance.id)
+	log.write("value of objective function for new instance "+str(instance.id[-1])+" which fixed variable at 0 is "+str(round(pyo.value(instance.objective),2)),id0)
+	log.write("value of objective function for new instance "+str(instance2.id[-1])+" which fixed variable at 1 is "+str(round(pyo.value(instance2.objective),2)),id0)
+	
 	
 	instance_manager.add(instance)
 	instance_manager.add(instance2)
@@ -269,21 +261,25 @@ def column_generation(instance,instance_manager):
 			#2b : if that solution is also integer, we need not continue this branch!
 		#3) else : add found constraints to constraints list, re-solve linear problem and continue
 	
-	if debug:
-		pprint(support.list_to_string(instance.id)+"+++++ entering column generation")
+	log.subtitle("entering column generation",instance.id)
 	
+	feasible_integer_found = False
 	loop_count = 1 
-	failure_count = 0
+	obj_val_old = pyo.value(instance.objective)
 	while support.continue_column_generation(instance,loop_count):
-	
-		#we first add capacity constraints
-		success, count = constraint.add_c_cap(instance)
-		connected_threshold.update()
+		log.write("column generation loop "+str(loop_count),instance.id)
 		
-		if debug:
-			print(support.list_to_string(instance.id)+"----- we found " +str(count) + " capacity cuts with threshold of " +str(connected_threshold.value))
+		#we first add capacity constraints
+		success, count = constraint.add_c_cap(instance)		
+		log.write_timed("----- we found " +str(count) + " capacity cuts",instance.id)
+		
+		if not(success) and support.solution_is_integer(instance):
+			#the solution found is valid and integer --> optimal within the branch
+			feasible_integer_found = True
+			instance_manager.record_feasible_integer_solution(instance)
+			log.write("feasible integer solution found with objective value of "+str(round(pyo.value(instance.objective),2)),instance.id)
 			
-		#in the future : add other constraints 
+		#we add other constraints : multi_start,comb... success boolean is update at each new heuristic
 		
 		#remove_inactive_constraints(instance)
 		
@@ -291,29 +287,24 @@ def column_generation(instance,instance_manager):
 		#ATTENTION : for feasible_integer_found to be true we only need to verify is_integer and connected components heuristic (not all other constraint generation heuristics)
 		#therefore, when adding new heursitics in the future, this breaking condition will have to be placed else where to happen also right after said heuristic
 		if not(success):
-			failure_count+=1
-			if debug:
-				print(support.list_to_string(instance.id)+"----- no cutting planes found with threshold of " +str(connected_threshold.value))
-			if failure_count>len(vals):		
-				if support.solution_is_integer(instance):
-					instance_manager.record_feasible_integer_solution(instance)
-					if debug :
-						print(support.list_to_string(instance.id)+"----- feasible solution found during column generation is integer!")
-						print(support.list_to_string(instance.id)+"----- branch is recorded and cut")
-						print(support.list_to_string(instance.id)+"----- value of objective function for solution is "+str(round(pyo.value(instance.objective),2)))
-						print()
-				else:
-					instance_manager.record_partial_solution(instance)
-				break
-		else:
-			failure_count = 0
+			instance_manager.record_partial_solution(instance)
+			break
+			
+		#resolve instance before reiterating 
 		results = opt.solve(instance)
+		obj_val = pyo.value(instance.objective)
+		log.write( "objective function after loop "+str(loop_count)+" : "+str(round(obj_val,4))+" ( "+str(support.integer_percent(instance))+"% integer )",instance.id)
 		
-		if debug:
-			pprint( support.list_to_string(instance.id)+"----- value of objective function during column generation "+str(loop_count)+" is "+str(round(pyo.value(instance.objective),10))+" and is "+str(support.integer_percent(instance))+"% integer")
+		#we verify that we are not stuck in an unmoving loop
+		if abs(obj_val-obj_val_old)<0.00000001 :
+			log.write("no evolution in column_generation, moving on to branching",instance.id)
+			break
+		
+		obj_val_old = obj_val
 		
 		loop_count+=1
-	
+		
+	return feasible_integer_found
 	
 def remove_inactive_constraints(instance):
 	#must disable constraints that are inactive being careful of the fact that they may become active again later on...
@@ -326,16 +317,19 @@ def main_loop(instance_manager):
 	
 	while instance!=None:
 		
+		log.subtitle("starting processing of new instance with lower_bound of "+str(instance.lower_bound),instance.id)
+		
 		#adding constriants and resolving and verifying if we have, by chance, found an integer and feasible solution
 		feasible_integer_found = column_generation(instance,instance_manager)
 			
 		#if we consider that we have done "enough", we also stop (typically : too many iterations)
-		if instance.depth < max_depth and support.max_time_not_reached() and instance_manager.best_feasible_integer_solution==None:
-		
+		if instance.depth < max_depth and max_time_not_reached() and instance_manager.best_feasible_integer_solution==None:
 			#branch and apply main_loop to the two new instances
 			branch(instance,instance_manager)
 		else : 
+			log.write_timed("branch is cut and recorded",instance.id)
 			instance_manager.record_partial_solution(instance)
+			
 		instance = instance_manager.pop() #will return none if there are no instances left in queue
 
 
@@ -343,12 +337,10 @@ def main_loop(instance_manager):
 ### MAIN ###
 ############
 
-print()
-print("using input file "+file)
+log.write("using input file "+file)
 instance.file = file
-print()
-print("++++++++++ starting CVRP solving for "+str(instance.n.value)+" nodes, "+str(instance.number_of_vehicles.value)+" vehicles with capacity of "+str(instance.capacity.value))
-print()
+log.title("starting CVRP solving for "+str(instance.n.value)+" nodes, "+str(instance.number_of_vehicles.value)+" vehicles with capacity of "+str(instance.capacity.value))
+
 
 #computing lower_bound
 instance.lower_bound = cbc.lower_bound(instance)
@@ -357,28 +349,28 @@ instance.lower_bound = cbc.lower_bound(instance)
 instance_manager = instance_manager()
 instance_manager.add(instance)
 
+log.write("initial upper bound of cvrp problem is "+str(instance_manager.upper_bound))
+
 #solving the initial instance in order to initialize instance.x values
 results = opt.solve(instance)
 
 #printing initial value of objective function
-if debug:
-	print("0----- initial value of objective function "+str(round(pyo.value(instance.objective),2))+" and is "+str(support.integer_percent(instance))+"% integer")
-	print()	
-	instance.log = ""
+log.write_spaced("0: initial value of objective function "+str(round(pyo.value(instance.objective),2))+" and is "+str(support.integer_percent(instance))+"% integer")
 	
 instance.id = [id.get_and_increment()]	
 instance.depth = 0
 main_loop(instance_manager)
-pprint("++++++++++ finished solving")
+log.title("finished solving")
 
 if instance_manager.best_feasible_integer_solution==None:
-		print("no optimal integer solution found")
-		print("lower bound found :" +str(pyo.value(instance_manager.partial_solution_recorded[0].objective)))
+	log.write("no optimal integer solution found")
+	log.write("best lower bound found :" +str(pyo.value(instance_manager.partial_solution_recorded[0].objective))+" and is "+str(support.integer_percent(instance_manager.partial_solution_recorded[0]))+"% integer")
 else:
-	if input("show instance ? (y/n) (yes/no) \n") in ["y","yes","oui","hell","yeah"]:
-		instance_manager.best_feasible_integer_solution.display()
-		
-
+	# if input("show instance ? (y/n) (yes/no) \n") in ["y","yes","oui","hell","yeah"]:
+		# instance_manager.best_feasible_integer_solution.display()
+	log.write("best feaible integer solution found has objective value of "+str(pyo.value(instance_manager.best_feasible_integer_solution.objective)))	
+	with open(log.full,'a') as f:
+		print(instance_manager.best_feasible_integer_solution.display(),file = f)
 
 ''' testing '''
 ''' this works well
