@@ -1,0 +1,7 @@
+import os
+import importlib
+import sys
+os.chdir("C:/Users/GVKD1542/Documents/python/v05")
+run = lambda file = "cvrp" : exec(open(file+".py").read(),globals())
+clear = lambda : os.system("cls")
+sys.argv = ["cvrp.py","test4.dat"]
