@@ -21,16 +21,20 @@ debug = False
 
 
 def add_c_cap(instance):
-	'''on tente d'abord l'heuristique des chemins 
-	connectés. Si elle échoue on passe aux trois 
-	autres heuristiques. Dans tous les cas, on 
-	interrompt si on a trouvé 'trop' de 
-	contraintes
-	'''
 	start = len(instance.c_cap)
-	success,components_single_demand_constrainted = add_c_cap_connectedcomps(instance)
+	
+	#1) connected components heuristic
+	success = False
+	for i in range(len(connected_threshold.vals)):
+		success_temp,components_single_demand_constrainted = add_c_cap_connectedcomps(instance)
+		connected_threshold.update() #after each call to connectedcomps we update the associated threshold with a given strategy to optimise the next iteration's success
+		success = success or success_temp
+		
+	#2 other heuristics if first one failed
+	#if not(success):
+		#...
 
-	return success, len(instance.c_cap)-start
+	return success, len(instance.c_cap)-start #second variable gives the number of cuts found during add_c_cap
 
 
 
