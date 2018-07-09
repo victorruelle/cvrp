@@ -11,7 +11,6 @@ from numpy import ceil
 from numpy import floor
 import threading
 from globals import *
-import time
 
 
 
@@ -181,44 +180,3 @@ def integer_percent(instance):
 		if is_int(instance.x[b]):
 			pos += 1
 	return round(pos/count*100,2)
-
-class timer():
-	def __init__(self):
-		self.origin = time.time()
-		self.pred = self.origin
-		self.curr = self.origin
-	
-	def lap(self):
-		self.curr = time.time()
-		elapsed = round(self.curr - self.pred,2)
-		self.pred = time.time() #we don't take self.curr for more precision
-		return str(elapsed)
-		
-	def empty_lap(self):
-		self.cur = time.time()
-	
-	def print_elapsed(self):
-		el = self.lap()
-		return("in "+el+" seconds (global clock : "+str(round(time.time()-self.origin,2))+")")
-		
-	def reset(self):
-		self = timer()
-	
-	def global_time(self):
-		return time.time()-self.origin
-
-time_record = timer()
-
-def pprint(message):
-	print(message)
-	print(time_record.print_elapsed())
-	print()
-	
-def reset_timer():
-	time_record.reset()
-
-def empty_time_lap():
-	time_record.empty_lap()
-
-def max_time_not_reached():
-	return time_record.global_time() < max_global_time
