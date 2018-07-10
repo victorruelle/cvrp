@@ -62,9 +62,9 @@ class writer():
 	def write_timed(self,message,id=None):
 		file = open(self.full,"a")
 		if id==None:
-			file.write("["+time_record.print_elapsed()+"] " + message+", "+"\n")
+			file.write(message+" "+"["+time_record.print_elapsed()+"] " + "\n")
 		else:
-			file.write("["+time_record.print_elapsed()+"] " + ls(id)+": "+message+", "+"\n")
+			file.write(ls(id)+": "+message+" "+"["+time_record.print_elapsed()+"] " + "\n")
 		file.close()
 	
 	def write_spaced(self,message,id=None):
@@ -83,11 +83,11 @@ class writer():
 		file = open(self.full,"a")
 		if id==None:
 			file.write("\n")
-			file.write("["+time_record.print_elapsed()+"] "+message+", "+time_record.print_elapsed()+"\n")
+			file.write(message+" "+time_record.print_elapsed()+"["+time_record.print_elapsed()+"] "+"\n")
 			# file.write("\n")
 		else:
 			file.write("\n")
-			file.write("["+time_record.print_elapsed()+"] " + ls(id)+": "+message+", "+time_record.print_elapsed()+"\n")
+			file.write(ls(id)+": "+message+" "+time_record.print_elapsed()+"["+time_record.print_elapsed()+"] " +"\n")
 			# file.write("\n")
 		file.close()
 	
@@ -121,6 +121,7 @@ class writer():
 		self.title("globals")
 		self.declare(eps,"epsilon")
 		self.declare(max_column_generation_count,"max number of column generation loops")
+		self.declare(max_unmoving_count,"maximum number of consecutive column generation loops without significant movement of the objective function before we cut the branch")
 		self.declare(max_depth,"max depth of search tree")
 		self.declare(max_time_for_shrinking,"maximum time spent for graph shrinking")
 		self.declare(max_size_for_shrinking,"maximum size of a set that can be shrunk")
@@ -130,7 +131,11 @@ class writer():
 class empty_writer():
 #empty class used as a trick that will allow the main threads calling writer to not verify the state if debug boolean.
 	def __init__(self,name=None):
-		self.name = name
+		if name==None:
+			self.name = stime("%d")+"-"+stime("%m")+"-"+stime("%Y")+"_"+stime("%H")+'h'+stime("%M")
+		else:
+			self.name = name
+		self.full = self.name+".log"
 		
 	def write(self,message,id=None):
 		return 
@@ -156,7 +161,138 @@ class empty_writer():
 	def write_globals(self):
 		return
 
-if debug :	
+		
+class mixed_writer():
+	def __init__(self,name=None):
+		if name==None:
+			self.name = stime("%d")+"-"+stime("%m")+"-"+stime("%Y")+"_"+stime("%H")+'h'+stime("%M")
+		else:
+			self.name = name
+		self.full = self.name+".log"
+		
+	def write(self,message,id=None):
+		file = open(self.full,"a")
+		if id==None:
+			file.write(message+"\n")
+		else:
+			file.write(ls(id)+": "+message+"\n")
+		file.close()
+	
+	def write_timed(self,message,id=None):
+		file = open(self.full,"a")
+		if id==None:
+			file.write(message+" "+"["+time_record.print_elapsed()+"] " + "\n")
+		else:
+			file.write(ls(id)+": "+message+" "+"["+time_record.print_elapsed()+"] " + "\n")
+		file.close()
+	
+	def write_spaced(self,message,id=None):
+		file = open(self.full,"a")
+		if id==None:
+			file.write("\n")
+			file.write(message+"\n")
+			# file.write("\n")
+		else:
+			file.write("\n")
+			file.write(ls(id)+": "+message+"\n")
+			# file.write("\n")
+		file.close()
+		
+	def write_timed_spaced(self,message,id=None):
+		file = open(self.full,"a")
+		if id==None:
+			file.write("\n")
+			file.write(message+" "+time_record.print_elapsed()+"["+time_record.print_elapsed()+"] "+"\n")
+			# file.write("\n")
+		else:
+			file.write("\n")
+			file.write(ls(id)+": "+message+" "+time_record.print_elapsed()+"["+time_record.print_elapsed()+"] " +"\n")
+			# file.write("\n")
+		file.close()
+	
+	def title(self,name):
+		pprint("++++++++++ "+name)
+		empty_time_lap()
+		file = open(self.full,"a")
+		file.write("\n")
+		file.write("\n")
+		file.write("\n")
+		file.write("++++++++++ "+name+"\n")
+		file.write("\n")
+		file.close()
+	
+	def subtitle(self,name,id=None):
+		if id==None:
+			pprint("+++++ "+name)
+		else:
+			pprint("+++++ "+ls(id)+": "+name)
+		empty_time_lap()
+		file = open(self.full,"a")
+		if id==None:
+			file.write("\n")
+			file.write("+++++ "+name+"\n")
+			# file.write("\n")file.close()
+		else:
+			file.write("\n")
+			file.write("+++++ "+ls(id)+": "+name+"\n")
+			# file.write("\n")
+		file.close()
+	
+	def declare(self,value,name):
+		self.write(name+": "+str(value))
+		
+	def write_globals(self):
+		self.title("globals")
+		self.declare(eps,"epsilon")
+		self.declare(max_column_generation_count,"max number of column generation loops")
+		self.declare(max_unmoving_count,"maximum number of consecutive column generation loops without significant movement of the objective function before we cut the branch")
+		self.declare(max_depth,"max depth of search tree")
+		self.declare(max_time_for_shrinking,"maximum time spent for graph shrinking")
+		self.declare(max_size_for_shrinking,"maximum size of a set that can be shrunk")
+		self.declare(max_global_time,"maximum time spent for the cvrp solving")
+		self.declare(vals,"threshold values iteratively used for the connected components heuristic")
+
+class print_writer:
+	def __init__(self,name=None):
+		if name==None:
+			self.name = stime("%d")+"-"+stime("%m")+"-"+stime("%Y")+"_"+stime("%H")+'h'+stime("%M")
+		else:
+			self.name = name
+		self.full = self.name+".log"
+		
+	def write(self,message,id=None):
+		return
+	
+	def write_timed(self,message,id=None):
+		return
+	
+	def write_spaced(self,message,id=None):
+		return
+		
+	def write_timed_spaced(self,message,id=None):
+		return
+	
+	def title(self,name):
+		pprint("++++++++++ "+name)
+	
+	def subtitle(self,name,id=None):
+		if id==None:
+			pprint("+++++ "+name)
+		else:
+			pprint("+++++ "+ls(id)+": "+name)
+		empty_time_lap()
+	
+	def declare(self,value,name):
+		return
+	
+	def write_globals(self):
+		return
+		
+if console_writing and logging :	
+	log = mixed_writer()
+elif not(console_writing) and logging:
 	log = writer()
+elif console_writing and not(logging):
+	log = print_writer()
 else:
 	log = empty_writer()
