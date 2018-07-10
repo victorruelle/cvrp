@@ -180,3 +180,64 @@ def integer_percent(instance):
 		if is_int(instance.x[b]):
 			pos += 1
 	return round(pos/count*100,2)
+
+def print_solution_routes(instance):
+	comps = find_components(instance)
+	message = "\n+++++ routes found : \n\n"
+	total_distance = 0
+	for i in range(len(comps)):
+		distance = 0
+		demand = 0
+		message += "road "+str(i)+": "
+		old_node = 0
+		message += str(old_node) + " -> "
+		demand += instance.demands[old_node]
+		for node in comps[i]:
+			message += str(node) + " -> "
+			demand += instance.demands[node]
+			distance += instance.costs[old_node,node]*instance.x[max(old_node,node),min(old_node,node)].value
+		message = message[:-4]
+		message += "\ndistance of route is "+str(distance)+" and demand served during route is "+str(demand)
+		total_distance += distance
+		message += "\n\n" 
+	message += "total distance of route is "+str(total_distance)
+	return message
+
+
+''' DUPLICATE FROM CAP CONSTRAINT '''
+
+class Components:
+	def __init__(self,n):
+		self.r = [i for i in range(1,n)]
+		self.c = []
+	
+	def free(self,i):
+		return i in self.r
+	
+	def take(self,i,k):
+		self.r.remove(i)
+		self.c[k].append(i)
+		
+		
+def find_components(instance):
+	comps = Components(instance.n.value)
+	for i in instance.nodes:
+		if comps.free(i) :
+			comps.c.append([])
+			k = len(comps.c)-1
+			explore_component(instance,i,comps,k)
+	return comps.c
+			
+
+def explore_component(instance,i,comps,k):
+	comps.take(i,k)
+	for j in comps.r:
+		if connected(instance,i,j):
+			explore_component(instance,j,comps,k)
+		
+
+def connected(instance,i,j):
+	a,b = max(i,j),min(i,j)
+	return instance.x[a,b].value>connected_threshold.value
+
+''' END OF DUPLICATE '''
