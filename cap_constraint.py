@@ -19,21 +19,36 @@ debug = False
 ### ADDING CUTS ###
 ###################
 
+successive_connectected_comp_fails = 0
 
 def add_c_cap(instance):
 	start = len(instance.c_cap)
 	
 	#1) connected components heuristic
 	success = False
-	for i in range(len(connected_threshold.vals)):
-		success_temp,components_single_demand_constrainted = add_c_cap_connectedcomps(instance)
-		connected_threshold.update() #after each call to connectedcomps we update the associated threshold with a given strategy to optimise the next iteration's success
-		success = success or success_temp
-		
+	# for i in range(len(connected_threshold.vals)):
+		# success_temp,components_single_demand_constrainted = add_c_cap_connectedcomps(instance)
+		# connected_threshold.update() #after each call to connectedcomps we update the associated threshold with a given strategy to optimise the next iteration's success
+		# success = success or success_temp
+	success,components_single_demand_constrainted = add_c_cap_connectedcomps(instance)
+	connected_threshold.update()
+	
+	global successive_connectected_comp_fails
+	if not(success):
+		successive_connectected_comp_fails += 1
+	else:
+		successive_connectected_comp_fails = 0
+	
+	if successive_connectected_comp_fails > len(connected_threshold.vals):
+		success = False
+	else:
+		success = True
+	
 	#2 other heuristics if first one failed
 	#if not(success):
 		#...
 
+		
 	return success, len(instance.c_cap)-start #second variable gives the number of cuts found during add_c_cap
 
 
