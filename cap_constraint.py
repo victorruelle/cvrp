@@ -5,76 +5,74 @@ Created on Tue Jun 26 13:39:47 2018
 @author: GVKD1542
 """
 
-
+from statistics import stats
 from numpy.random import choice
+from random import random
 import pyomo.environ as pyo
 from numpy import ceil
 from numpy import Infinity
-from globals import *
+from globals import eps,precision,connected_threshold,vals_for_projection,max_size_for_shrinking,max_time_for_shrinking,random_components,normal_components,max_flow_cuts,random_cuts,given_demand_components
 from time import time
 from itertools import combinations as comb
-debug = False
+import networkx as nx
+from random import shuffle
+
 
 ###################
 ### ADDING CUTS ###
 ###################
 
-successive_connectected_comp_fails = 0
-
 def add_c_cap(instance):
 	start = len(instance.c_cap)
-	
-	#1) connected components heuristic
 	success = False
-	# for i in range(len(connected_threshold.vals)):
-		# success_temp,components_single_demand_constrainted = add_c_cap_connectedcomps(instance)
-		# connected_threshold.update() #after each call to connectedcomps we update the associated threshold with a given strategy to optimise the next iteration's success
-		# success = success or success_temp
-	success,components_single_demand_constrainted = add_c_cap_connectedcomps(instance)
+	#connected comps candidates
+	if random_components:
+		candidate_cuts = find_components_random(instance.x,instance.n.value)
+		candidate_cuts += complementaries(instance,candidate_cuts) #we also test for the complementary of each connected comp found
+		success_temp,components_single_demand_constrainted = add_capacity_cuts_from_cuts(instance,candidate_cuts,position=" random components")
+		success = success or success_temp
+	if normal_components:
+		candidate_cuts = find_components(instance.x,instance.n.value)
+		candidate_cuts += complementaries(instance,candidate_cuts) #we also test for the complementary of each connected comp found
+		success_temp,components_single_demand_constrainted = add_capacity_cuts_from_cuts(instance,candidate_cuts,position=" normal components")
+		success = success or success_temp
+	if max_flow_cuts:
+		candidate_cuts = find_maxflow_cuts(instance)
+		success_temp,components_single_demand_constrainted = add_capacity_cuts_from_cuts(instance,candidate_cuts,ub="fractional",position=" max flow cuts") 
+		success = success or success_temp
+	if random_cuts:
+		candidate_cuts = find_random_cuts(instance.x,instance.n.value)
+		success_temp,components_single_demand_constrainted = add_capacity_cuts_from_cuts(instance,candidate_cuts,position=" random cuts") 
+		success = success or success_temp
+	if given_demand_components:
+		count, success_temp = 0, False
+		while not(success_temp) and count<10:
+			count += 1
+			candidate_cuts = find_components_correct_implementation_given_demand(instance.x,instance.n.value,instance.demands)
+			success_temp,components_single_demand_constrainted = add_capacity_cuts_from_cuts(instance,candidate_cuts,position=" given demand components correct")
+			success = success or success_temp
+		count, success_temp = 0, False
+		while not(success_temp) and count<10:
+			count += 1
+			candidate_cuts = find_components_given_demand(instance.x,instance.n.value,instance.demands)
+			success_temp,components_single_demand_constrainted = add_capacity_cuts_from_cuts(instance,candidate_cuts,position=" given demand components")
+			success = success or success_temp
+	del(candidate_cuts)
 	connected_threshold.update()
-	
-	global successive_connectected_comp_fails
-	if not(success):
-		successive_connectected_comp_fails += 1
-	else:
-		successive_connectected_comp_fails = 0
-	
-	if successive_connectected_comp_fails > len(connected_threshold.vals):
-		success = False
-	else:
-		success = True
-	
-	#2 other heuristics if first one failed
-	#if not(success):
-		#...
-
-		
 	return success, len(instance.c_cap)-start #second variable gives the number of cuts found during add_c_cap
+	
+	
 
+###################################
+### HEURISTICS FOR FINDING CUTS ###
+###################################
 
-
-##################
-### HEURISTICS ###
-##################
-
-
-def add_c_cap_connectedcomps(instance):
-	if debug:
-		print()
-		print("starting connectedcomps heuristic")
-		
-		print()
-	'''heurisitque des connected components
-	on calcule les routes connectées (hormis le dépot)
-	et on calcule les contraintes de capacité pour les 
-	sous graphes ainsi générés ainsi que pour leur complémentaire
-	'''
-	count = 0 #number of cuts
-	comp = find_components(instance)
+def add_capacity_cuts_from_cuts(instance,cuts,ub="rounded",position=None):
+	count = 0 #number of added cuts
 	demand_of_non_connected_to_depot = 0
 	passage_of_non_connected_to_depot = 0
 	components_single_demand_constrainted = []
-	for c in comp:
+	for c in cuts:
 		demand = 0
 		passage = 0 #attention on a enlevé infini, si aucun passage il faut couper aussi non?
 		for node in c:
@@ -82,35 +80,27 @@ def add_c_cap_connectedcomps(instance):
 			for i in instance.nodes:
 				if not(i in c):
 					passage += instance.x[max(node,i),min(node,i)]
-		lb = ceil(demand/instance.capacity)*2
-		if pyo.value(passage) < lb:
-			instance.c_cap.add(passage>=lb)
+		lb = (ceil(demand/instance.capacity)*2 if ub=="rounded" else demand*2/instance.capacity)
+		if pyo.value(passage) < lb-precision:
+			if position != None:
+				stats.update([instance.objective_value,instance.depth,len(instance.c_cap)],"slack"+position,extra_val = pyo.value(passage) - lb+precision )
+			instance.c_cap.add(passage>=lb-precision)
 			count+=1
 			if lb == 2 :
 				components_single_demand_constrainted.append(c) #will be used for next heuristic
 		if instance.x[c[-1],0].value<eps: # this component is not connected to the depot
 			demand_of_non_connected_to_depot += demand
 			passage_of_non_connected_to_depot += passage
-			
-		c_complementary = [i for i in instance.nodes if not(i in c+[0])] #0 ne doit pas être dedans!!
-		demand = 0
-		passage = 0
-		for node in c_complementary:
-			demand+= instance.demands[node]
-			for i in instance.nodes:
-				if not(i in c_complementary):
-					passage += instance.x[max(node,i),min(node,i)]
-		lb = ceil(demand/instance.capacity)*2
-		if pyo.value(passage) < lb:
-			instance.c_cap.add(passage>=lb)
-			count+=1
-			if lb == 2 :
-				components_single_demand_constrainted.append(c_complementary) #will be used for next heuristic
-	lb = ceil(demand_of_non_connected_to_depot/instance.capacity)*2
-	if pyo.value(passage_of_non_connected_to_depot) < lb :
-		instance.c_cap.add(passage_of_non_connected_to_depot>= lb)
-	del(passage,demand,lb,passage_of_non_connected_to_depot,demand_of_non_connected_to_depot,comp)
+	lb = (ceil(demand_of_non_connected_to_depot/instance.capacity)*2 if ub=="rounded" else demand_of_non_connected_to_depot*2/instance.capacity)
+	if pyo.value(passage_of_non_connected_to_depot) < lb - precision :
+		instance.c_cap.add(passage_of_non_connected_to_depot>= lb-precision)
+		count += 1
+	#del(passage,demand,lb,passage_of_non_connected_to_depot,demand_of_non_connected_to_depot)
+	if position != None:
+		stats.update([instance.objective_value,instance.depth,len(instance.c_cap)],"number of valid cuts"+position,extra_val = count )
 	return count>0, components_single_demand_constrainted
+
+	
 
 ''' H2+H3+H4 :
 H2 : adapted max-flow
@@ -120,18 +110,150 @@ H2 : adapted max-flow
 2) max-flow problem with lower bound capacity inequalities 
 	to find cuts (subtilty to find more than one cut
 3) repeat 2) 3 times with previous cuts in memory
-
-H3 : greedy construnction
-1) shrinking
-2) 
-
-H4 : ??
 '''
 
+def find_maxflow_cuts(instance):
+	g = [ (i,j,{'capacity':1,'weigth':instance.x[max(i,j),min(i,j)]}) for i in range(1,instance.n.value) for j in range(1,instance.n.value) if i!=j]
+	for i in range(1,instance.n.value):
+		if instance.x[i,0].value >= instance.demands[i]*2/instance.capacity :
+			g.append( (i,0,{'capacity':2,'weigth':instance.x[i,0].value-instance.demands[i]*2/instance.capacity}) )
+		else:
+			g.append( (instance.n.value+1,i,{'capacity':2,'weigth':-instance.x[i,0].value+instance.demands[i]*2/instance.capacity}) )
+	val,partition = nx.minimum_cut(nx.DiGraph(g),0,instance.n.value+1)
+	a = list(partition[0])
+	if val<sum(max(0,-instance.x[i,0].value+instance.demands[i]*2/instance.capacity) for i in range(1,instance.n.value)):
+		#print("max_flow cuts found")
+		a.remove(0)
+		return [a]
+	return []
+
+
+def find_components(x,n,thresh=None):
+	comps = Components(n)
+	first_set = [ i for i in range(1,n) if x[i,0].value>=1-eps ]
+	for i in first_set:
+		if comps.free(i) :
+			comps.c.append([])
+			k = len(comps.c)-1
+			explore_component(x,i,comps,k,thresh=thresh)
+	for i in comps.r:
+		if comps.free(i) :
+			comps.c.append([])
+			k = len(comps.c)-1
+			explore_component(x,i,comps,k,thresh=thresh)
+	cuts = []
+	for c in comps.c:
+		if len(c)>1:
+			cuts.append(c)
+	return cuts
+
+def find_integer_components(x,n):
+	comps = Components(n)
+	first_set = [ i for i in range(1,n) if x[i,0].value>=1-eps ]
+	for i in first_set:
+		if comps.free(i) :
+			comps.c.append([])
+			k = len(comps.c)-1
+			explore_integer_components(x,i,comps,k)
+	for i in comps.r:
+		if comps.free(i) :
+			comps.c.append([])
+			k = len(comps.c)-1
+			explore_integer_components(x,i,comps,k)
+	cuts = []
+	for c in comps.c:
+		if len(c)>1:
+			cuts.append(c)
+	return cuts
+
+def find_components_random(x,n,thresh=0.7):
+	comps = Components(n)
+	first_set = [ i for i in range(1,n) if x[i,0].value>=1-eps ]
+	for i in first_set:
+		if comps.free(i) :
+			comps.c.append([])
+			k = len(comps.c)-1
+			explore_component_random(x,i,comps,k,thresh=thresh)
+	for i in comps.r:
+		if comps.free(i) :
+			comps.c.append([])
+			k = len(comps.c)-1
+			explore_component_random(x,i,comps,k,thresh=thresh)
+	cuts = []
+	for c in comps.c:
+		if len(c)>1:
+			cuts.append(c)
+	return cuts
+
+def find_components_given_demand(x,n,demands):
+	comps = Components(n)
+	first_set = [ i for i in range(1,n) if x[i,0].value>=1-eps ]
+	for i in first_set:
+		if comps.free(i) :
+			comps.c.append([])
+			k = len(comps.c)-1
+			explore_component_given_demand(x,i,comps,k,demands)
+	for i in comps.r:
+		if comps.free(i) :
+			comps.c.append([])
+			k = len(comps.c)-1
+			explore_component_given_demand(x,i,comps,k,demands)
+	cuts = []
+	for c in comps.c:
+		if len(c)>1:
+			cuts.append(c)
+	return cuts
+
+def find_components_correct_implementation_given_demand(x,n,demands):
+	comps = Components(n)
+	first_set = [ i for i in range(1,n) if x[i,0].value>=1-eps ]
+	for i in first_set:
+		if comps.free(i) :
+			comps.c.append([])
+			k = len(comps.c)-1
+			explore_component_correct_implementation_given_demand(x,i,comps,k,demands)
+	for i in comps.r:
+		if comps.free(i) :
+			comps.c.append([])
+			k = len(comps.c)-1
+			explore_component_correct_implementation_given_demand(x,i,comps,k,demands)
+	cuts = []
+	for c in comps.c:
+		if len(c)>1:
+			cuts.append(c)
+	return cuts
+
+
+def find_random_cuts(x,n):
+	amount = 5
+	cuts = [[]*amount]
+	for i in range(len(cuts)):
+		for j in range(max(1,int(random()*n))):
+			k = max(1,int(random()*n))
+			if not(k in cuts[i]):
+				cuts[i].append(k)
+	return cuts
 
 ###############
 ### SUPPORT ###
 ###############
+
+def feasible_paths(instance):
+    #checks to capacity constraints on solution that has been found as integer
+	# returns true if solution is feasible, else return false and adds corresponding constraints
+	roads = find_integer_components(instance.x,instance.n.value)
+	success,components_single_demand_constrainted = add_capacity_cuts_from_cuts(instance,roads)
+	return not(success)
+
+def complementaries(instance,cuts):
+	return [ complementary(instance,c) for c in cuts if complementary(instance,c)!=[] ]
+
+def complementary(instance,cut):
+	return 	[i for i in range(1,instance.n.value) if not(i in cut)]
+
+def closest(val,list=vals_for_projection):
+	l = sorted(list,key = lambda x : abs(x-val))
+	return l[0]
 
 
 '''	 CONNETED COMPONENTS CUTS SUPPORT ''' 
@@ -139,6 +261,7 @@ H4 : ??
 class Components:
 	def __init__(self,n):
 		self.r = [i for i in range(1,n)]
+		shuffle(self.r)
 		self.c = []
 	
 	def free(self,i):
@@ -148,27 +271,61 @@ class Components:
 		self.r.remove(i)
 		self.c[k].append(i)
 		
-		
-def find_components(instance):
-	comps = Components(instance.n.value)
-	for i in instance.nodes:
-		if comps.free(i) :
-			comps.c.append([])
-			k = len(comps.c)-1
-			explore_component(instance,i,comps,k)
-	return comps.c
-			
 
-def explore_component(instance,i,comps,k):
+def explore_component_random(x,i,comps,k,thresh=0.7):
+	comps.take(i,k)
+	if connected(x,i,0) and random()>thresh:
+		return
+	for j in comps.r:
+		if connected(x,i,j):
+			explore_component_random(x,j,comps,k)
+
+def explore_component_given_demand(x,i,comps,k,demands):
+	comps.take(i,k)
+	if sum(demands[i] for i in comps.c[k])>=8 and connected(x,i,0):
+		return
+	for j in comps.r:
+		if connected(x,i,j):
+			explore_component_given_demand(x,j,comps,k,demands)
+
+def explore_component(x,i,comps,k,thresh=None):
 	comps.take(i,k)
 	for j in comps.r:
-		if connected(instance,i,j):
-			explore_component(instance,j,comps,k)
-		
+		if connected(x,i,j,thresh=thresh):
+			explore_component(x,j,comps,k)
 
-def connected(instance,i,j):
+def explore_component_correct_implementation(x,i,comps,k):
+#actually does what I had thought it did : i want a true road at the end, one with no junctions!
+	comps.take(i,k)
+	for j in comps.r:
+		if connected(x,i,j):
+			explore_component_correct_implementation(x,j,comps,k)
+			break
+
+def explore_component_correct_implementation_given_demand(x,i,comps,k,demands):
+#actually does what I had thought it did : i want a true road at the end, one with no junctions!
+	comps.take(i,k)
+	if sum(demands[i] for i in comps.c[k])>=8 and connected(x,i,0):
+		return
+	for j in comps.r:
+		if connected(x,i,j):
+			explore_component_correct_implementation(x,j,comps,k)
+			break
+
+
+def explore_integer_components(x,i,comps,k):
+	comps.take(i,k)
+	for j in comps.r:
+		if connected_specific(x,i,j):
+			explore_integer_components(x,j,comps,k)
+
+def connected(x,i,j,thresh=None):
 	a,b = max(i,j),min(i,j)
-	return instance.x[a,b].value>connected_threshold.value
+	return x[a,b].value>(connected_threshold.value if thresh==None else thresh)
+
+def connected_specific(x,i,j):
+	a,b = max(i,j),min(i,j)
+	return x[a,b].value>1-eps
 	
 ''' GRAPH SHRINKING '''
 
@@ -206,7 +363,7 @@ def verify_safe_shrinking(instance,set):
 	if outgoing_passage(instance,set) > 2 :
 		return False
 	for i in range(2,len(set)):
-		sub_sets = com(set,i)
+		sub_sets = comb(set,i)
 		for sub in sub_sets :
 			if outgoing_passage(instance,sub) < 2:
 				return False
