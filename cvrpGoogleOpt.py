@@ -6,7 +6,8 @@ from ortools.constraint_solver import routing_enums_pb2
 from math import sqrt
 import time
 import sys
-from logging_cvrp import log
+from globals import *
+from logging_cvrp import *
 import initialize_model as init
 
 #calculating upper_bound of problem
@@ -30,7 +31,7 @@ class DataProblemDistances():
 	def __init__(self,instance,distances):
 			self._vehicle = Vehicle(instance.capacity.value)
 			self._num_vehicles = instance.number_of_vehicles.value
-			self._distances = [[0 for i in range(instance.n.value)] for i in range(instance.n.value)]
+			self._distances = [[0]*instance.n.value]*instance.n.value
 			for i in range(instance.n.value):
 				for j in range(instance.n.value):
 					self._distances[i][j] = distances[i,j]
@@ -128,7 +129,8 @@ class CreateDistanceEvaluator(object): # pylint: disable=too-few-public-methods
 
 	def distance_evaluator(self, from_node, to_node):
 		"""Returns the manhattan distance between the two nodes"""
-		return self._distances[from_node][to_node]
+		global dilate
+		return dilate(self._distances[from_node][to_node])
 
 class CreateDistanceEvaluator2(object):
 	"""Creates callback to return distance between points."""
@@ -138,7 +140,8 @@ class CreateDistanceEvaluator2(object):
 
 	def distance_evaluator(self, from_node, to_node):
 		"""Returns the manhattan distance between the two nodes"""
-		return self._distances[from_node][to_node]
+		global dilate
+		return dilate(self._distances[from_node][to_node])
 
 class CreateDemandEvaluator(object): # pylint: disable=too-few-public-methods
 	"""Creates callback to get demands at each location."""
@@ -179,8 +182,8 @@ def calculate_distance(data,routing,assignment,distance_evaluator):
 
 ###########
 # Printer #
-########### printer = ConsolePrinterDistance(data_distances,routing_distance,assignment_distances,distance_evaluator_distances).print()
-class ConsolePrinterLocations():
+###########
+class ConsolePrinter():
 	"""Print solution to console"""
 	def __init__(self, data, routing, assignment):
 		"""Initializes the printer"""
@@ -209,7 +212,7 @@ class ConsolePrinterLocations():
 		total_dist = 0
 		for vehicle_id in xrange(self.data.num_vehicles):
 			index = self.routing.Start(vehicle_id)
-			plan_output = 'Route for vehicle {0}:\n'.format(vehicle_id)
+			#plan_output = 'Route for vehicle {0}:\n'.format(vehicle_id)
 			route_dist = 0
 			route_load = 0
 			while not self.routing.IsEnd(index):
@@ -220,95 +223,98 @@ class ConsolePrinterLocations():
 					self.data.locations[node_index],
 					self.data.locations[next_node_index])
 				route_load += self.data.demands[node_index]
-				plan_output += ' {0} Load({1}) -> '.format(node_index, route_load)
+				#plan_output += ' {0} Load({1}) -> '.format(node_index, route_load)
 				index = self.assignment.Value(self.routing.NextVar(index))
 
 			node_index = self.routing.IndexToNode(index)
 			total_dist += route_dist
-			plan_output += ' {0} Load({1})\n'.format(node_index, route_load)
-			plan_output += 'Distance of the route: {0}m\n'.format(route_dist)
-			plan_output += 'Load of the route: {0}\n'.format(route_load)
-			print(plan_output)
+			#plan_output += ' {0} Load({1})\n'.format(node_index, route_load)
+			#plan_output += 'Distance of the route: {0}m\n'.format(route_dist)
+			#plan_output += 'Load of the route: {0}\n'.format(route_load)
+			#print(plan_output)
 		print('Total Distance of all routes: {0}m'.format(total_dist))
 
+def import_data(n,k):
+	file = "M-n"+str(n)+"-k"+str(k)+".vrp"
+	with open("C:\\Users\\GVKD1542\\Documents\\python\\Vrp-Set-X\\X\\"+file,"r") as f:
+		"""reading .dat data file"""
+		lines = f.readlines()	
+		#values are seperated either by space or indent
+		sep = ' ' if ' ' in lines[7] else '\t'		
+		#number of vehicles
+		line = lines[0]
+		line = line.split(":")
+		line = line[1]
+		line = line.split("-")
+		word = line[2]
+		number_of_vehicles = int(sanitze(word[1:]))			
+		#dimension
+		line = lines[3]
+		line = line.split(":")
+		dimension = int(sanitze(line[1]))			
+		#capacity
+		line = lines[5]
+		line = line.split(":")
+		capacity = int(sanitze(line[1]))			
+		locations_start_index = 7
+		demands_start_index = locations_start_index + dimension + 1 #skip over title			
+		#locations
+		locations = {}
+		for i in range(dimension):
+			line = lines[locations_start_index+i]
+			line = line.split(sep)
+			try:
+				n,i,j = int(sanitze(line[0]))-1,int(sanitze(line[1])),int(sanitze(line[2]))#dans les fichiers vrp, l'indexation commence à 1
+			except IndexError:
+				print("mauvaise indentation dans locations avec : ")
+				print(line)
+				print(n)
+				print(i)
+				print(j)
+				print(len(line))
+			locations[n] = i,j
+		
+		#demands
+		demands = []
+		for i in range(dimension):
+			line = lines[demands_start_index+i]
+			line = line.split(sep)
+			try :
+				demands.append(int(sanitze(line[1])))
+			except ValueError:
+				print("error while adding demands with : ")
+				print(demands_start_index+i)
+				print(line)
+				print(line[1])
+				print(sanitze(line[1]))
+	return dimension, capacity, number_of_vehicles, locations, demands
 
-class ConsolePrinterDistance():
-	"""Print solution to console"""
-	def __init__(self, data, routing, assignment,distance_evaluator):
-		"""Initializes the printer"""
-		self._data = data
-		self._routing = routing
-		self._assignment = assignment
-		self._distance_evaluator = distance_evaluator
-
-	@property
-	def data(self):
-		"""Gets problem data"""
-		return self._data
-
-	@property
-	def routing(self):
-		"""Gets routing model"""
-		return self._routing
-
-	@property
-	def assignment(self):
-		"""Gets routing model"""
-		return self._assignment
-
-	def print(self):
-		"""Prints assignment on console"""
-		# Inspect solution.
-		total_dist = 0
-		for vehicle_id in xrange(self.data.num_vehicles):
-			index = self.routing.Start(vehicle_id)
-			plan_output = 'Route for vehicle {0}:\n'.format(vehicle_id)
-			route_dist = 0
-			route_load = 0
-			while not self.routing.IsEnd(index):
-				node_index = self.routing.IndexToNode(index)
-				next_node_index = self.routing.IndexToNode(
-					self.assignment.Value(self.routing.NextVar(index)))
-				route_dist += self._distance_evaluator(node_index,next_node_index)
-				route_load += self.data.demands[node_index]
-				plan_output += ' {0} Load({1}) -> '.format(node_index, route_load)
-				index = self.assignment.Value(self.routing.NextVar(index))
-
-			node_index = self.routing.IndexToNode(index)
-			total_dist += route_dist
-			plan_output += ' {0} Load({1})\n'.format(node_index, route_load)
-			plan_output += 'Distance of the route: {0}m\n'.format(route_dist)
-			plan_output += 'Load of the route: {0}\n'.format(route_load)
-			print(plan_output)
-		print('Total Distance of all routes: {0}m'.format(total_dist))
-	
-	def return_roads(self):
-		roads = []
-		for vehicle_id in xrange(self.data.num_vehicles):
-			roads.append([])
-			index = self.routing.Start(vehicle_id)
-			while not self.routing.IsEnd(index):
-				roads[-1].append(index if index<self.data.num_locations else 0)
-				index = self.assignment.Value(self.routing.NextVar(index))
-			roads[-1].append(0)
-		return(roads)
-
+def sanitze(str):
+	chars = ['\t','\n',";"]
+	for c in chars:
+		while c in str:
+			i = str.index(c)
+			try :
+				str = str[:i]+str[i+len(c):]
+			except IndexError:
+				print("sanitze out of range with : ")
+				print(str + "c = " + c + " i = "+ str(i) + "len = " + str(len(c)) )
+	return str
 
 ########
 # Main #
 ########
 
-def solve_distances(instance,distances,max_time):
+def upper_bound(instance,distances):
 	"""Entry point of the program"""
 	# Instantiate the data problem.
 	data = DataProblemDistances(instance,distances)
-	#data = DataProblem(instance,locations)
+	distance_evaluator = CreateDistanceEvaluator2(data).distance_evaluator
 	model_parameters = pywrapcp.RoutingModel.DefaultModelParameters()
 	# Create Routing Model
 	routing = pywrapcp.RoutingModel(data.num_locations, data.num_vehicles, data.depot,model_parameters)
 	# Define weight of each edge
-	#distance_evaluator = CreateDistanceEvaluator(data).distance_evaluator
-	distance_evaluator = CreateDistanceEvaluator2(data).distance_evaluator
+	
 	routing.SetArcCostEvaluatorOfAllVehicles(distance_evaluator)
 	# Add Capacity constraint
 	demand_evaluator = CreateDemandEvaluator(data).demand_evaluator
@@ -317,22 +323,65 @@ def solve_distances(instance,distances,max_time):
 	search_parameters = pywrapcp.RoutingModel.DefaultSearchParameters()	
 	search_parameters.first_solution_strategy = (
 		routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC)
-	search_parameters.local_search_metaheuristic = (
-		routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH)
 	# Disabling Large Neighborhood Search, (this is the default behaviour)
+	search_parameters.time_limit_ms = 3000
 	search_parameters.local_search_operators.use_path_lns = False
 	search_parameters.local_search_operators.use_inactive_lns = False
 	# Routing: forbids use of TSPOpt neighborhood,
 	search_parameters.local_search_operators.use_tsp_opt = False	
 	search_parameters.use_light_propagation = False
 	# Solve the problem.
-	search_parameters.time_limit_ms = 1000*max_time
-	# search_parameters.solution_limit = 1
 	assignment = routing.SolveWithParameters(search_parameters)
-	printer = ConsolePrinterDistance(data,routing,assignment,distance_evaluator)	
-	return(calculate_distance(data, routing, assignment,distance_evaluator),printer.return_roads())
+	t = type(empty())
+	count = 0
+	while type(assignment)==t:
+		data._num_vehicles += 1 
+		count +=1
+		routing = pywrapcp.RoutingModel(data.num_locations, data.num_vehicles, data.depot,model_parameters)
+		routing.SetArcCostEvaluatorOfAllVehicles(distance_evaluator)
+		add_capacity_constraints(routing, data, demand_evaluator)
+		assignment = routing.SolveWithParameters(search_parameters) 
+	return calculate_distance(data, routing, assignment,distance_evaluator)
 
-def solve_locations(instance,locations,max_time):
+def lower_bound(instance,distances):
+	"""Entry point of the program"""
+	# Instantiate the data problem.
+	data = DataProblemDistances(instance,distances)
+	model_parameters = pywrapcp.RoutingModel.DefaultModelParameters()
+	# Create Routing Model
+	routing = pywrapcp.RoutingModel(data.num_locations, data.num_vehicles, data.depot,model_parameters)
+	# Define weight of each edge
+	distance_evaluator = CreateDistanceEvaluator2(data).distance_evaluator
+	routing.SetArcCostEvaluatorOfAllVehicles(distance_evaluator)
+	# Add Capacity constraint
+	demand_evaluator = CreateDemandEvaluator(data).demand_evaluator
+	# add_capacity_constraints(routing, data, demand_evaluator)
+	# Setting first solution heuristic (cheapest addition).
+	search_parameters = pywrapcp.RoutingModel.DefaultSearchParameters()	
+	search_parameters.first_solution_strategy = (
+		routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC)
+	# Disabling Large Neighborhood Search, (this is the default behaviour)
+	search_parameters.time_limit_ms = 3000
+	search_parameters.local_search_operators.use_path_lns = False
+	search_parameters.local_search_operators.use_inactive_lns = False
+	# Routing: forbids use of TSPOpt neighborhood,
+	search_parameters.local_search_operators.use_tsp_opt = False	
+	search_parameters.use_light_propagation = False
+	# Solve the problem.
+	assignment = routing.SolveWithParameters(search_parameters)
+	t = type(empty())
+	count = 0
+	while type(assignment)==t:
+		data._num_vehicles += 1 
+		count +=1
+		routing = pywrapcp.RoutingModel(data.num_locations, data.num_vehicles, data.depot,model_parameters)
+		routing.SetArcCostEvaluatorOfAllVehicles(distance_evaluator)
+		add_capacity_constraints(routing, data, demand_evaluator)
+		assignment = routing.SolveWithParameters(search_parameters) 
+	return calculate_distance(data, routing, assignment,distance_evaluator)
+
+
+def main(instance,locations,max_time):
 	"""Entry point of the program"""
 	# Instantiate the data problem.
 	data = DataProblem(instance,locations)
@@ -361,8 +410,50 @@ def solve_locations(instance,locations,max_time):
 	search_parameters.time_limit_ms = 1000*max_time
 	# search_parameters.solution_limit = 1
 	assignment = routing.SolveWithParameters(search_parameters)
-	return(calculate_distance(data, routing, assignment,distance_evaluator))
+	print(calculate_distance(data, routing, assignment,distance_evaluator))
+	printer = ConsolePrinter(data, routing, assignment)
+	printer.print()
+	# print("elapsed time : " + str(round(time.time()-start,2)))
 
+def main_new(instance,distances,max_time=60*10):
+	"""Entry point of the program"""
+	# Instantiate the data problem.
+	data = DataProblemDistances(instance,distances)
+	distance_evaluator = CreateDistanceEvaluator2(data).distance_evaluator
+	model_parameters = pywrapcp.RoutingModel.DefaultModelParameters()
+	# Create Routing Model
+	routing = pywrapcp.RoutingModel(data.num_locations, data.num_vehicles, data.depot,model_parameters)
+	# Define weight of each edge
+	
+	routing.SetArcCostEvaluatorOfAllVehicles(distance_evaluator)
+	# Add Capacity constraint
+	demand_evaluator = CreateDemandEvaluator(data).demand_evaluator
+	add_capacity_constraints(routing, data, demand_evaluator)
+	# Setting first solution heuristic (cheapest addition).
+	search_parameters = pywrapcp.RoutingModel.DefaultSearchParameters()	
+	search_parameters.first_solution_strategy = (
+		routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC)
+	search_parameters.local_search_metaheuristic = (
+		routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH)
+	# Disabling Large Neighborhood Search, (this is the default behaviour)
+	search_parameters.time_limit_ms = max_time*1000
+	search_parameters.local_search_operators.use_path_lns = False
+	search_parameters.local_search_operators.use_inactive_lns = False
+	# Routing: forbids use of TSPOpt neighborhood,
+	search_parameters.local_search_operators.use_tsp_opt = False	
+	search_parameters.use_light_propagation = False
+	# Solve the problem.
+	assignment = routing.SolveWithParameters(search_parameters)
+	t = type(empty())
+	count = 0
+	while type(assignment)==t:
+		data._num_vehicles += 1 
+		count +=1
+		routing = pywrapcp.RoutingModel(data.num_locations, data.num_vehicles, data.depot,model_parameters)
+		routing.SetArcCostEvaluatorOfAllVehicles(distance_evaluator)
+		add_capacity_constraints(routing, data, demand_evaluator)
+		assignment = routing.SolveWithParameters(search_parameters) 
+	return calculate_distance(data, routing, assignment,distance_evaluator)
 
 def empty():
 	return 
@@ -378,4 +469,4 @@ if __name__ == '__main__':
 			# val = lines[0]
 		# print("optimal : "+val)
 	instance,locations = init.full_init(sys.argv[1])
-	print(solve_distances(instance,instance.costs,int(float(sys.argv[2]))))
+	main(instance,locations,int(float(sys.argv[2])))
