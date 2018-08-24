@@ -42,9 +42,9 @@ a feasible solution is a solution that satisfies all constraints (cap and degree
 ### MAIN ###
 ############
 if len(sys.argv)==1:
-    raise "Enter a file name for solving"
+	raise "Enter a file name for solving"
 elif "carp" in sys.argv[1]:
-    raise "Carp problems (without specified number of vehicles) are not yet supported"
+	raise "Carp problems (without specified number of vehicles) are not yet supported"
 else:
 	instance,locations = init.full_init(sys.argv[1])
 
