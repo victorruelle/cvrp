@@ -1,5 +1,6 @@
 import sys
 from logging_cvrp import log
+from numpy import sqrt
 
 
 
@@ -22,8 +23,8 @@ def sanitize(string,seperator=""):
 	return string
 
 
-def create_dat_smart(in_name,out_name):
-	with open("C:\\Users\\GVKD1542\\Documents\\python\\instances\\"+in_name,"r") as f:
+def create_dat(in_name,out_name):
+	with open(in_name,"r") as f:
 		"""reading .vrp data file"""
 		''' supported formats : all formats from http://vrp.atd-lab.inf.puc-rio.br/index.php/en/ 
 		letters must all be put to capital, all seperation characters (except . for commas) will be treated equally
@@ -142,9 +143,10 @@ def create_dat_smart(in_name,out_name):
 				locations[(0,0)] = float(line[0])
 				locations[(0,1)] = float(line[1])
 		else:
+			raise Exception("WEIGHT INPUT not yet implemented, must take into account the different types of wieghts input (lower,higher,complete etc.)")
 			for i in range(len(lines)):
 				line = lines[i]
-				if line[0]=="EDGE" and line[1]=="WEIGHT" and line[2]=="TYPE":
+				if line[0]=="EDGE" and line[1]=="WEIGHT" and line[2]=="SECTION":
 					start_index = i+1
 					found = True
 					break
@@ -157,8 +159,8 @@ def create_dat_smart(in_name,out_name):
 				for j in range(len(line)):
 					try:
 						weights[(i,j)] = float(line[j])
-					except IndexError:
-						raise "Error in writing of weights with paremeters "+str(i)+" "+str(j)
+					except:
+						raise Exception("Error in writing of weights with paremeters "+str(i)+" "+str(j)+" "+str(start_index))
 		
 
 		#number of vehicles
@@ -185,11 +187,11 @@ def create_dat_smart(in_name,out_name):
 	if input_type == "COORD":
 		for i in range(dimension):
 			for j in range(dimension):
-				weights[i,j] = pow( pow(locations[(i,0)]-locations[(j,0)],2) + pow(locations[(i,1)]-locations[(j,1)],2) , 0.5 )
+				weights[i,j] = sqrt( (locations[(i,0)]-locations[(j,0)])**2 + (locations[(i,1)]-locations[(j,1)])**2)
 
 	'''writing those variables in the right format'''
 
-	with open("C:\\Users\\GVKD1542\\Documents\\python\\v09\\"+out_name,"w") as f:
+	with open(out_name,"w") as f:
 
 		#number of vehicles
 		f.write("param number_of_vehicles := " + str(number_of_vehicles) + ";\n")
