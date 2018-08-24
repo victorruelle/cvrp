@@ -1,26 +1,28 @@
-from globals import id,opt,eps,node_selection,force_integer_to_depot
-from statistics import stats
+from globals import max_time_upper_bound,opt,eps,node_selection,force_integer_to_depot, relative_distance_closest_neighboor
 from logging_cvrp import log
 import pyomo.environ as pyo
 import cvrpGoogleOpt as google       #upper bound function
-from cap_constraint import find_components
+from cap_constraint import find_integer_components
 
 
 
 dist = lambda x,y : pow(( (x[0]-y[0])**2 + (x[1]-y[1])**2 ),0.5)
 
 class instance_manager():
-	#CAREFUL class is not thread safe!!
+	# class for managing the instance queue from the search tree
 	def __init__(self,instance):
 		self.queue = []
-		self.upper_bound = google.upper_bound(instance,instance.costs)
+		ub,roads = google.solve_distances(instance,instance.costs,max_time_upper_bound)
+		self.upper_bound = ub
 		self.length = 0
-		self.best_feasible_integer_solution = None
+		self.best_feasible_integer_solution = create_instance_from_roads(instance,roads)
 		self.branches_cut = 0
 		self.partial_solution_recorded = []
 		self.total_length = 0
 
 	def add(self,instance):
+    	# adds instance only if its lower_bound <= the upper bound of the problem
+		# orders the queue in increasing ordere of lower_bound
 		if instance.lower_bound <= self.upper_bound:
 			self.queue.append(instance)
 			self.queue = sorted(self.queue,key = lambda x : x.lower_bound)
@@ -28,18 +30,26 @@ class instance_manager():
 			self.total_length += 1
 		else:
 			self.branches_cut += 1
-		stats.update([instance.objective_value,instance.depth,len(instance.c_cap)],"add instance to queue")
 	
 	def pop(self):
+    	# pops an instance from the search tree queue, order of popping depends on node_selection 
 		while self.length>0:
 			if node_selection == "best_bound_first":
 				instance = self.queue.pop(0)
 			elif node_selection == "depth_search":
 				instance = self.queue.pop(-1)
+			elif node_selection == "best_bound_frist_on_smallest_depth":
+				min_depth,instance = min(self.queue,key = lambda instance: instance.depth).depth,None
+				for inst in self.queue:
+					if inst.depth == min_depth:
+						instance = inst
+						break
+				if instance == None:
+					raise Exception("Implementation bug in finding best bound first on smallest depth instance")
+				self.queue.remove(instance)
 			else:
-				raise NameError("enter a valide node_selection stategy")
+				raise NameError("Enter a valide node_selection stategy")
 			self.length -= 1
-			stats.update([instance.objective_value,instance.depth,len(instance.c_cap)],"remove instance from queue")
 			#we must verify that the condition still holds because the upper_bound may have changed since time of adding
 			if instance.lower_bound < self.upper_bound and instance.x[1,0].value!=None :
 				return instance
@@ -48,6 +58,7 @@ class instance_manager():
 		return None
 	
 	def record_feasible_integer_solution(self,instance):
+    	# places an instance that has been verified as integer as feasible in the corresponding attribute of the instance_manager
 		if instance.objective_value <  self.upper_bound : 
 			self.upper_bound = instance.objective_value
 			integerize_solution(instance)
@@ -55,6 +66,7 @@ class instance_manager():
 			
 	
 	def record_partial_solution(self,instance):
+    	# adds a 'partial' solution to the corresponding list of the instance_manager. This is used to retrieve instances for debugging
 		index = 0
 		while index<self.length and self.queue[index].lower_bound<instance.lower_bound :
 			index +=1
@@ -65,6 +77,9 @@ class instance_manager():
 			
 
 def solve(instance,silent=False):
+    # solves an instance and updates its attribute objective_value
+	# returns the boolean describing the success of the solver
+	# takes into account the possible problem reduction (reduce problem in globals) an relaxes the reduction if no solution is found
 	if silent:
 		res = opt.solve(instance)
 		if res.Solver[0]['Termination condition'].key=='infeasible':
@@ -76,8 +91,7 @@ def solve(instance,silent=False):
 		instance.objective_value = pyo.value(instance.objective)
 		return True
 	#else:
-	stats.update([instance.objective_value,instance.depth,number_of_active_constraints(instance.c_cap)],"start instance solving")
-	log.write_awaiting_answer("active constraints: "+str(number_of_active_constraints(instance.c_cap)))
+	log.write_awaiting_answer("active constraints: "+str(number_of_active_constraints(instance)))
 	res = opt.solve(instance)
 	if res.Solver[0]['Termination condition'].key=='infeasible':
 		if instance.reduction >= 1:
@@ -88,13 +102,14 @@ def solve(instance,silent=False):
 			reduce_problem(instance,min(instance.reduction+0.2,1))
 			solve(instance)
 	instance.objective_value = pyo.value(instance.objective)
-	stats.update([instance.objective_value,instance.depth,number_of_active_constraints(instance.c_cap)],"end instance solving")
 	log.write_awaiting_answer("solved in",timed=True)
 	return True
 
+
 def set_lower_bound(instance):
-	log.write_awaiting_answer("lower bound is now being calculated...",instance.id)
-	stats.update([instance.objective_value,instance.depth,len(instance.c_cap)],"start lb solving")
+    # sets the lower bound of an instance
+	# for now this is set to attribute simply the objective_value 
+	#log.write_awaiting_answer("lower bound is now being calculated...",instance.id)
 	instance.lower_bound = instance.objective_value
 	'''instance2 = instance.clone()
 	for var in instance2.x.values():
@@ -104,15 +119,15 @@ def set_lower_bound(instance):
 	res = opt.solve(instance2)
 	instance.lower_bound = max(pyo.value(instance2.objective),instance.objective_value)
 	del(instance2)'''
-	stats.update([instance.objective_value,instance.depth,len(instance.c_cap)],"end lb solving")
-	log.write_timed("DONE")
+	#log.write_timed("DONE")
 
-
-###############
-### SUPPORT ###
-###############
+######################
+### SIMPLIFICATION ###
+######################
 
 def reduce_problem(instance,threshold):
+    # eliminates variables based on the their cost (cost of the corresponding edge)
+	# if cost >= threshold, the edge will be fixed at 0
 	for i,j in [(a,b) for a in range(instance.n.value) for b in range(a)]:
 		if not ((i,j) in instance.branching_indexes):
 			if instance.costs[(i,j)] > threshold*instance.max_cost:
@@ -120,29 +135,95 @@ def reduce_problem(instance,threshold):
 				instance.x[(i,j)].fixed = True
 			else:
 				instance.x[(i,j)].fixed = False
-	instance.reduction = threshold
+	instance.reduction = threshold	
 
-def reduce_problem_neighboors(instance,amount):
-	#reduces problem by disabling links between every node and it's neighboors
-	#always leaves the depot as neighboor and leaves also the amount closest neighboors (graph is not oriented so there will possibly more than amount neighboors for some nodes)
-	for i,j in [(a,b) for a in range(1,instance.n.value) for b in range(1,a)]:
-		instance.x[i,j].value = 0
-		instance.x[i,j].fixed = True		
+def integerize_edges_to_depot(instance):
+	# force the edges connecting every node to the depot to be integer
 	for i in range(1,instance.n.value):
-		for j in sorted([k for k in range(1,instance.n.value)],key = lambda k : instance.costs[i,k])[:amount]:
-			instance.x[i,j].fixed = False
-			instance.x[i,j].value = 0
-	
+		instance.x[i,0].domain = pyo.NonNegativeIntegers
 
-def number_of_active_constraints(clist):
+def unintegerize_edges_to_depot(instance):
+	# force the edges connecting every node to the depot to be float
+	for i in range(1,instance.n.value):
+		instance.x[i,0].domain = pyo.NonNegativeReals
+
+def integerize_all_edges(instance):
+	# force all the edges to be integer
+	for i in range(instance.n.value):
+		for j in range(i):
+			instance.x[i,j].domain = pyo.NonNegativeIntegers
+
+def integerize_edges(instance,max_dist=None,smart = False):
+    # force edges to be integer if their cost >= max_dist 
+	# if no max_dist is given, it will use the maximum distance of the instance (defined as the maximum distance between to nodes of the instance)
+	# returns the list of integers that have been processed, this can be used to undo this action
+	max_dist = max_dist*instance.max_cost if max_dist != None else instance.max_cost*relative_distance_closest_neighboor
+	integerized = []
+	for i,j in instance.x.keys():
+		if (i,j) in instance.branching_indexes or (  0 in [i,j]  if force_integer_to_depot else False ):
+			continue
+		if instance.costs[i,j] > max_dist:
+			continue
+		if smart and max( sum( 1 if instance.x[max(i,k),min(i,k)].value>eps else 0 for k in instance.nodes if k!=i ), sum( 1 if instance.x[max(j,k),min(j,k)].value>eps else 0 for k in instance.nodes if k!=j ) ) < 3:
+			continue
+		instance.x[i,j].domain = pyo.NonNegativeIntegers
+		integerized.append((i,j))
+	return integerized
+
+def unintegerize_edges(instance,integerized=None):
+    # force edges to be float 
+	# if integerized is given, only contained indexes will be processed
+	# else it will process all nodes for which cost >= maximum distance of the instance (defined as the maximum distance between to nodes of the instance)
+	if integerized != None:
+		for i,j in integerized:
+			instance.x[i,j].domain = pyo.NonNegativeReals
+	else:
+		for i in range(instance.n.value):
+			for j in range(i):
+				if not((i,j) in instance.branching_indexes) and ( not( 0 in [i,j] ) if force_integer_to_depot else True ):
+					instance.x[i,j].domain = pyo.NonNegativeReals
+
+def fix_specific_edges(instance,instance_manager,thresh=eps*3):
+    # force specific nodes to be at 1
+	# will apply to nodes such that their value >= 1 - thresh
+	roads = find_integer_components(instance.x,instance.n.value)
+	for k in instance.x.keys():
+		if instance.x[k].value >= 1 - eps and not(instance.x[k].fixed):
+			i,j = k
+			new_road = [i,j]
+			for r in roads:
+				if r[0]==i or r[-1]==i:
+					new_road += r
+					new_road.remove(i) #duplicate i
+				if r[0]==j or r[-1]==j:
+					new_road += r
+					new_road.remove(j) #duplicate i
+			if sum( instance.demands[n] for n in new_road ) <= instance.capacity.value:
+				instance.x[k].value = 1
+				instance.x[k].fixed = True
+	solve(instance,silent=True)
+	set_lower_bound(instance)
+	instance.depth += 1
+	instance.id.append("0")
+	instance_manager.add(instance)
+
+###############
+### SUPPORT ###
+###############
+
+def number_of_active_constraints(instance):
+	# returns the number of constraints that are active in a constraint list clist
 	count = 0
-	for k in clist.keys():
-		if clist[k].active :
+	for c,val in list(instance.dual.items()):
+		parent,index = c.parent_component().name,c.index()
+		#if parent == 'c_deg':
+		#	continue
+		if c.active :
 			count += 1
 	return count
 
 def solution_is_integer(instance):
-    	#returns bool describing wheter instance.x only has integers 
+    #returns bool describing wheter instance.x only has integers 
 	# with slack epsilon (eps)
 	for b in [(i,j) for i in range(instance.n.value) for j in range(i)]:
 		val = instance.x[b].value
@@ -157,6 +238,7 @@ def integerize_solution(instance):
 		instance.x[b].value = round(instance.x[b].value)
 
 def integer_percent(instance):
+	# returns float describing the percentage of variables that are integer
 	count = 0
 	pos = 0
 	for b in instance.x.keys():
@@ -171,7 +253,8 @@ def is_int(x):
 	return abs(round(x.value)-x.value)<eps
 
 def print_solution_routes(instance):
-	comps = find_components(instance.x,instance.n.value)
+    # returns a string containing a verbose description of the routes that are contained in an instance solution
+	comps = find_integer_components(instance.x,instance.n.value)
 	message = "\n+++++ routes found : \n\n"
 	total_distance = 0
 	for i in range(len(comps)):
@@ -192,68 +275,12 @@ def print_solution_routes(instance):
 	message += "total distance of route is "+str(total_distance)
 	return message
 
-def dilate_problem(instance,factor=2):
-	for i in range(instance.n.value):
-		for j in range(i):
-			instance.costs[(i,j)] = pow(instance.costs[(i,j)],factor)
-
-def normalize_demands(instance,max=1):
-	max_demand = 0
-	for i in instance.nodes:
-		if instance.demands[i]>max_demand:
-			max_demand = instance.demands[i]
-	for i in instance.nodes:
-		instance.demands[i]/=max_demand
-		instance.demands[i]*=max
-
-def normalize_costs(instance,max=1):
-	max_costs = 0
-	for i in range(instance.n.value):
-		for j in range(i):
-			if instance.costs[(i,j)]>max_costs:
-				max_costs = instance.costs[(i,j)]
-	for i in range(instance.n.value):
-		for j in range(i):
-			instance.costs[(i,j)]/=max_costs
-			instance.costs[(i,j)]*=max
-
-def fix_edges_to_depot(instance):
-	for i in range(1,instance.n.value):
-		instance.x[i,0].domain = pyo.NonNegativeIntegers
-
-def unfix_edges_to_depot(instance):
-	for i in range(1,instance.n.value):
-		if not((i,0) in instance.branching_indexes or (0,i) in instance.branching_indexes):
-			instance.x[i,0].domain = pyo.NonNegativeReals
-
-def fix_all_edges(instance):
-	for i in range(instance.n.value):
-		for j in range(i):
-			instance.x[i,j].domain = pyo.NonNegativeIntegers
-
-def unfix_edges(instance):
-	for i in range(instance.n.value):
-		for j in range(i):
-			if not((i,j) in instance.branching_indexes) and not((j,i) in instance.branching_indexes) and ( not( 0 in [i,j] ) if fix_edges_to_depot else True ):
-				instance.x[i,j].domain = pyo.NonNegativeReals
-
-def freeze_integer_edges(instance):
-	frozen = []
-	integerized = []
-	for i in range(instance.n.value):
-		for j in range(i):
-			if (i,j) in instance.branching_indexes or (j,i) in instance.branching_indexes or (  0 in [i,j]  if fix_edges_to_depot else False ):
-				continue
-			if is_int(instance.x[i,j]):
-				instance.x[i,j].fixed = True
-				frozen.append((i,j))
-			else:
-				instance.x[i,j].domain = pyo.NonNegativeIntegers
-				integerized.append((i,j))
-	return frozen,integerized
-
-def unfreeze_integer_edges(instance,frozen,integerized):
-	for i,j in frozen:
-		instance.x[i,j].fixed = False
-	for i,j in integerized:
-		instance.x[i,j].domain = pyo.NonNegativeReals
+def create_instance_from_roads(instance,roads):
+	instance_gg = instance.clone()
+	for k in instance_gg.x.keys():
+		instance_gg.x[k].value = 0
+	for road in roads:
+		for i in range(len(road)-1):
+			instance_gg.x[max(road[i],road[i+1]),min(road[i],road[i+1])].value = 1
+	instance_gg.objective_value = pyo.value(instance_gg.objective)
+	return instance_gg
