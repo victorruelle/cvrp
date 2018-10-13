@@ -1,7 +1,17 @@
 import os
 import importlib
 import sys
-os.chdir("C:/Users/GVKD1542/Documents/python/v06")
+os.chdir("C:/Users/GVKD1542/Documents/python/v10")
 run = lambda file = "cvrp" : exec(open(file+".py").read(),globals())
 clear = lambda : os.system("cls")
-sys.argv = ["cvrp.py","test4.dat"]
+
+sys.argv = ["cvrp.py","E-n30-k3.dat"]
+run()
+
+import initialize_model as init
+instance,locations = init.full_init("E-n33-k4.vrp")
+
+import graph as g
+import instance_managing as m
+import branching as b
+import cap_constraint as cap

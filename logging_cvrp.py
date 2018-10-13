@@ -47,6 +47,22 @@ def max_time_not_reached():
 	
 def global_time():
 	return time_record.global_time()
+
+class queue_logger():
+	def __init__(self,log):
+		self.name = log.name
+		self.full = self.name + "/queue.log"
+		self.full_tree = self.name + "/search_tree.log"
+
+	def write(self,instance_manager):
+		file = open(self.full,"a")
+		message  = []
+		for instance in instance_manager.queue:
+			#message.append([instance.id,instance.objective_value])
+			message.append([instance.objective_value])
+		message = str(message)
+		file.write(message+"\n")
+		file.close()
 	
 class writer():
 	def __init__(self,name=None):
@@ -56,7 +72,7 @@ class writer():
 			self.name = name
 		self.name = "results/"+self.name
 		self.full = self.name+"/record.log"
-		if g.graphing or g.logging or g.stats_monitoring:
+		if g.graphing or g.logging or g.search_tree in ["complete","end"] or g.graph_current_solution:
 			os.makedirs(self.name)
 		
 	def write(self,message,id=None):
@@ -165,7 +181,7 @@ class empty_writer():
 			self.name = name
 		self.name = "results/"+self.name
 		self.full = self.name+"/record.log"
-		if g.graphing or g.logging or g.stats_monitoring:
+		if g.graphing or g.logging or g.search_tree in ["complete","end"] or g.graph_current_solution :
 			os.makedirs(self.name)
 		
 	def write(self,message,id=None):
@@ -195,7 +211,7 @@ class empty_writer():
 	def write_globals(self):
 		return
 
-	def write_awaiting_answer(self,message,id=None):
+	def write_awaiting_answer(self,message,id=None,timed=False):
 		return
 	
 	def write_answer(self,message,id=None):
@@ -209,7 +225,7 @@ class mixed_writer():
 			self.name = name
 		self.name = "results/"+self.name
 		self.full = self.name+"/record.log"
-		if g.graphing or g.logging or g.stats_monitoring:
+		if g.graphing or g.logging or g.search_tree in ["complete","end"] or g.graph_current_solution:
 			os.makedirs(self.name)
 		
 	def write(self,message,id=None):
@@ -324,7 +340,7 @@ class print_writer:
 			self.name = name
 		self.name = "results/"+self.name
 		self.full = self.name+"/record.log"
-		if g.graphing or g.logging or g.stats_monitoring:
+		if g.graphing or g.logging or g.search_tree in ["complete","end"] or g.graph_current_solution:
 			os.makedirs(self.name)
 		
 	def write(self,message,id=None):
@@ -362,7 +378,7 @@ class print_writer:
 	def write_globals(self):
 		return
 	
-	def write_awaiting_answer(self,message,id=None):
+	def write_awaiting_answer(self,message,id=None,timed=False):
 		return
 	
 	def write_answer(self,message,id=None):
@@ -383,3 +399,4 @@ elif g.console_writing and not(g.logging):
 	log = print_writer()
 else:
 	log = empty_writer()
+queue_log = queue_logger(log)

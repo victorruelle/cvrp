@@ -33,7 +33,7 @@ values()
 
 #finding source code of a functions
 from dill.source import getsource
-#print getsource(function)
+#print(getsource(function))
 
 #finding value of objective function
 pyo.value(instance.objective)
@@ -51,3 +51,7 @@ importlib.reload(file) #no quotation marks
 del(model)
 del(instance)
 del(instance.set/par/var....)
+
+#looking into dual set of values
+instance.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
+instance.dual.items() # = generator of tuples(constraint, value of dual)
